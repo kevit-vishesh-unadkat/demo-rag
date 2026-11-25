@@ -1,6 +1,7 @@
-"""One-time indexing: read docs in data/, chunk, embed, store in ChromaDB.
+"""Indexing: read docs in data/, chunk, embed, store in ChromaDB.
 
-Usage:  python ingest.py
+Use from the Streamlit sidebar (Build index button) or from the terminal:
+    python ingest.py
 Re-run whenever documents (or EMBED_MODEL) change; it rebuilds the index.
 """
 from pathlib import Path
@@ -9,6 +10,13 @@ from pypdf import PdfReader
 
 import config
 from retriever import get_client, get_embedder
+
+SUPPORTED = (".pdf", ".txt", ".md")
+
+
+def list_documents():
+    config.DATA_DIR.mkdir(exist_ok=True)
+    return [p for p in sorted(config.DATA_DIR.glob("**/*")) if p.suffix.lower() in SUPPORTED]
 
 
 def read_file(path: Path):
@@ -35,12 +43,14 @@ def chunk_words(text: str, size: int, overlap: int):
             break
 
 
-def main():
-    files = [p for p in sorted(config.DATA_DIR.glob("**/*"))
-             if p.suffix.lower() in (".pdf", ".txt", ".md")]
+def build_index(show_progress: bool = False):
+    """Rebuild the index from data/. Returns (n_chunks, n_files).
+
+    Raises ValueError with a readable message if nothing can be indexed.
+    """
+    files = list_documents()
     if not files:
-        print(f"No documents found in {config.DATA_DIR}. Add PDF/TXT/MD files first.")
-        return
+        raise ValueError(f"No documents found in {config.DATA_DIR}. Add PDF/TXT/MD files first.")
 
     ids, docs, metas = [], [], []
     for path in files:
@@ -49,15 +59,12 @@ def main():
                 ids.append(f"{path.name}-p{page}-c{i}")
                 docs.append(chunk)
                 metas.append({"source": path.name, "page": page})
-        print(f"Read {path.name}")
 
     if not docs:
-        print("No extractable text found (scanned PDFs need OCR).")
-        return
+        raise ValueError("No extractable text found (scanned PDFs need OCR).")
 
-    print(f"Embedding {len(docs)} chunks...")
     embeddings = get_embedder().encode(
-        docs, normalize_embeddings=True, show_progress_bar=True
+        docs, normalize_embeddings=True, show_progress_bar=show_progress
     ).tolist()
 
     client = get_client()
@@ -76,7 +83,16 @@ def main():
             embeddings=embeddings[i:i + batch],
             metadatas=metas[i:i + batch],
         )
-    print(f"Done. Indexed {len(docs)} chunks from {len(files)} file(s).")
+    return len(docs), len(files)
+
+
+def main():
+    try:
+        n_chunks, n_files = build_index(show_progress=True)
+    except ValueError as e:
+        print(e)
+        return
+    print(f"Done. Indexed {n_chunks} chunks from {n_files} file(s).")
 
 
 if __name__ == "__main__":
