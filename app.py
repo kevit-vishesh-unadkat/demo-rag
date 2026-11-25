@@ -3,10 +3,12 @@
 Run:  streamlit run app.py
 """
 import hashlib
+from pathlib import Path
 
 import streamlit as st
 
 import config
+import ingest
 import llm
 import retriever
 import stt
@@ -27,12 +29,37 @@ with st.sidebar:
         st.session_state.last_audio_hash = None
         st.rerun()
 
+    st.divider()
+    st.header("Documents")
+    uploads = st.file_uploader(
+        "Upload PDF, TXT or MD files",
+        type=[ext.lstrip(".") for ext in ingest.SUPPORTED],
+        accept_multiple_files=True,
+    )
+    existing = ingest.list_documents()
+    if existing:
+        st.caption("In data/: " + ", ".join(p.name for p in existing))
+
+    if st.button("Save & build index", type="primary"):
+        config.DATA_DIR.mkdir(exist_ok=True)
+        for f in uploads or []:
+            # use only the file name, never a path from the client
+            (config.DATA_DIR / Path(f.name).name).write_bytes(f.getvalue())
+        try:
+            with st.spinner("Reading, chunking and embedding documents..."):
+                n_chunks, n_files = ingest.build_index()
+            st.success(f"Indexed {n_chunks} chunks from {n_files} file(s).")
+        except ValueError as e:
+            st.error(str(e))
+        except Exception as e:
+            st.error(f"Indexing failed: {e}")
+
 # ---------- state ----------
 st.session_state.setdefault("history", [])
 st.session_state.setdefault("last_audio_hash", None)
 
 if retriever.index_size() == 0:
-    st.warning("No index found. Put documents in `data/` and run `python ingest.py` first.")
+    st.info("No documents indexed yet. Upload files in the sidebar and click **Save & build index**.")
     st.stop()
 
 
