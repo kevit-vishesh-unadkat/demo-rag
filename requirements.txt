@@ -1,0 +1,8 @@
+streamlit
+faster-whisper
+sentence-transformers
+chromadb
+pypdf
+groq
+edge-tts
+python-dotenv
